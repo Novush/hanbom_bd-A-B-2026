@@ -1,1 +1,0 @@
-irm https://ollama.com/install.ps1 | iex

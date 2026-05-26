@@ -1,0 +1,5 @@
+irm https://ollama.com/install.ps1 | iex
+
+그리고
+
+ollama run qwen2.5-coder:1.5b
