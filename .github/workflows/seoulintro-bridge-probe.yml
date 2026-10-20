@@ -1,0 +1,90 @@
+name: Probe SeoulIntro repository bridge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/seoulintro-bridge-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bridge-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Build branch sharing limsflex-exs root
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/seoulintro-bridge"
+          rm -rf "$work"
+          mkdir -p "$work"
+          cd "$work"
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          printf '# limsflex-exs\nExmaples\n' > README.md
+          readme_blob=$(git hash-object -w README.md)
+          test "$readme_blob" = "f028911f8d77acb245834d6168783214b2e7dc3b"
+          root_tree=$(printf '100644 blob %s\tREADME.md\n' "$readme_blob" | git mktree)
+          test "$root_tree" = "beee54d32a6ed42beb70cd43b981b000efba7058"
+
+          cat > reconstruct.py <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          payload = '''tree beee54d32a6ed42beb70cd43b981b000efba7058
+          author Rheehose <sea35652@gmail.com> 1792386874 +0900
+          committer GitHub <noreply@github.com> 1792386874 +0900
+
+          Initial commit'''
+          signature = '''-----BEGIN PGP SIGNATURE-----
+
+          wsFcBAABCAAQBQJq1ac6CRC1aQ7uu5UhlAAA4LAQAFv06n7OlBvS2LUw5lnwqGWY
+          LVt43+n+xEk1ntcN+ZcVifzIACmok9+sPyTYGB+DVMQR3Ys9OpTP1eIh1GVp/0EW
+          OHOy08K5lJVNPctY3lA89MsATR3Owcsixs7DLaacls37J1ky53jBfcj7dpHyvArl
+          1b7JJgVqL/5LCq3KOQal4DptjItMg+u7Rl2g9qPNJkfcGCZwJiubOl9lUbRzBO/t
+          MxLN8gPfykFxpDNqImd6Jn5WSPRByVrSZ/gsGWvEGztxdB33ifokTaCCyJjs6l64
+          8DIciHgzkb40VGSd9vXxKSY66xruNNKIiG0dRDI6E4vp8/WR2od0UBtaZkWJGw5b
+          MHeJBIEsQqrAGUxCHtGTOxv3VfrFkG3m4Yb8Z/UaiNUNP6R/fBtp1xSyJC3Ws/iA
+          v/1Uo+fmMTpGQElNjcdW72lzum0TSMT2UAXNmINHQr7EB3TmSDUr2qCdfFB1sCM7
+          XPI8SEtsKOSAffczlDRFStaiNrRnc7u/WZ5i4LSbqu+6nG4cyfT/lCbumHm1ZJ1R
+          MBOF+L7J5TjWKJKeRKCG0wfG8bo7gdsI0AfHgqbASeG5f6a46ehzojbj2QsW3ax8
+          PYO6btkkNLz5yExhl3EYgo6Xa0pwWMzt7P8SfDSAoKlSGHX/wbVxx2Qd8UGVK+Hn
+          ETc1OMEaW/KCEEh/3TKD
+          =o6rO
+          -----END PGP SIGNATURE-----
+          '''
+          lines = payload.split('\n')
+          insert_at = next(i for i, line in enumerate(lines) if line.startswith('committer ')) + 1
+          sig_lines = signature.split('\n')
+          gpg = ['gpgsig ' + sig_lines[0], *[' ' + line for line in sig_lines[1:]]]
+          raw = '\n'.join(lines[:insert_at] + gpg + lines[insert_at:]).encode()
+          oid = hashlib.sha1(f'commit {len(raw)}\0'.encode() + raw).hexdigest()
+          assert oid == '86329820b2299e7a3b3570329f7b28989e6fac08', oid
+          Path('root.commit').write_bytes(raw)
+          PY
+          python3 reconstruct.py
+          root_commit=$(git hash-object -t commit -w root.commit)
+          test "$root_commit" = "86329820b2299e7a3b3570329f7b28989e6fac08"
+
+          git read-tree "$root_commit"
+          mkdir -p SeoulIntro
+          printf 'Cross-repository merge behavior probe.\n' > SeoulIntro/bridge-probe.txt
+          git add README.md SeoulIntro/bridge-probe.txt
+          tree=$(git write-tree)
+          export GIT_AUTHOR_NAME="Rheehose"
+          export GIT_AUTHOR_EMAIL="sea35652@gmail.com"
+          export GIT_COMMITTER_NAME="github-actions[bot]"
+          export GIT_COMMITTER_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+          commit=$(printf 'test: probe SeoulIntro bridge\n' | git commit-tree "$tree" -p "$root_commit")
+
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin "$commit:refs/heads/seoulintro-root-probe"
+          echo "Pushed $commit"
